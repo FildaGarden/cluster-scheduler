@@ -1,0 +1,17 @@
+# Binárky
+     scheduler
+     agent/agent
+     master/master
+     *.exe
+     *.exe~
+     *.dll
+     *.so
+     *.dylib
+   
+# Závislosti (pokud nepoužíváte vendor složku)
+    vendor/
+   
+# IDE a OS specifické
+    .idea/
+    .vscode/
+    .DS_Store

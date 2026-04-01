@@ -1,0 +1,161 @@
+package master
+
+import (
+	"bytes"
+	"cluster-scheduler/proto"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Master struct {
+	ListenAddr string
+	NodeMap    map[string]*proto.Node
+	JobMap     map[string]*proto.Job
+	mu         sync.Mutex
+}
+
+func New(listenAddr string) *Master {
+	return &Master{
+		ListenAddr: listenAddr,
+		NodeMap:    make(map[string]*proto.Node),
+		JobMap:     make(map[string]*proto.Job),
+	}
+
+}
+
+// Spusteni http serveru a handling routes
+func (m *Master) Start() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/register", m.handleRegister)
+	mux.HandleFunc("/heartbeat", m.handleHeartbeat)
+	mux.HandleFunc("/submit", m.handleSubmit)
+	mux.HandleFunc("/update_job", m.handleUpdateJob)
+
+	log.Printf("Master poslouchá na %s", m.ListenAddr)
+	server := &http.Server{
+		Addr:    m.ListenAddr,
+		Handler: mux,
+	}
+	log.Fatal(server.ListenAndServe())
+}
+
+// Status update
+func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
+	var jobUpdate proto.Job
+	if err := json.NewDecoder(req.Body).Decode(&jobUpdate); err != nil {
+		http.Error(w, "Invalid job update", http.StatusBadRequest)
+		return
+	}
+
+	m.mu.Lock()
+	if job, ok := m.JobMap[jobUpdate.ID]; ok {
+		job.Status = jobUpdate.Status
+		job.FinishedAt = jobUpdate.FinishedAt
+		log.Printf("Job %s updated to status: %s", job.ID, job.Status)
+	}
+	m.mu.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+}
+
+//  Registrace noveho Node do Clusteru
+func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
+	var node proto.Node
+	if err := json.NewDecoder(req.Body).Decode(&node); err != nil {
+		http.Error(w, "Invalid node registration", http.StatusBadRequest)
+		return
+	}
+
+	m.mu.Lock()
+	node.LastSeen = time.Now()
+	m.NodeMap[node.ID] = &node
+	m.mu.Unlock()
+
+	log.Printf("Uzel zaregistrován: %s (%s)", node.ID, node.Address)
+	w.WriteHeader(http.StatusOK)
+}
+
+// Node update
+func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
+	var hb proto.Heartbeat
+	if err := json.NewDecoder(req.Body).Decode(&hb); err != nil {
+		http.Error(w, "Invalid heartbeat", http.StatusBadRequest)
+		return
+	}
+
+	m.mu.Lock()
+	if node, ok := m.NodeMap[hb.NodeID]; ok {
+		node.CPUPercent = hb.CPUPercent
+		node.MemoryPercent = hb.MemoryPercent
+		node.AvailableCores = hb.AvailableCores
+		node.TotalCores = hb.TotalCores
+		node.FreeMemoryMB = hb.FreeMemoryMB
+		node.TotalMemoryMB = hb.TotalMemoryMB
+		node.LastSeen = time.Now()
+		
+		log.Printf("💓 Heartbeat [%s]: CPU %.1f%% | RAM %d/%d MB (%d Cores volno)", 
+			hb.NodeID, node.CPUPercent, node.FreeMemoryMB, node.TotalMemoryMB, node.AvailableCores)
+	}
+	m.mu.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Provizorni prirazeni Job -> Node (FIFO)
+// TODO: Implementovat vice algoritmu
+func (m *Master) handleSubmit(w http.ResponseWriter, req *http.Request) {
+	var job proto.Job
+	if err := json.NewDecoder(req.Body).Decode(&job); err != nil {
+		http.Error(w, "Invalid job submission", http.StatusBadRequest)
+		return
+	}
+
+	if job.ID == "" {
+		job.ID = fmt.Sprintf("job-%s", uuid.New().String())
+	}
+	job.Status = proto.JobPending
+	job.CreatedAt = time.Now()
+
+	m.mu.Lock()
+	m.JobMap[job.ID] = &job
+
+	var selectedNode *proto.Node
+	for _, node := range m.NodeMap {
+		if node.AvailableCores >= job.CPUCores && node.FreeMemoryMB >= uint64(job.MemoryMB) {
+			selectedNode = node
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	if selectedNode == nil {
+		http.Error(w, "No available nodes for this job", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Priprava na prirazeni
+	job.NodeID = selectedNode.ID
+	job.Status = proto.JobRunning
+	job.StartedAt = time.Now()
+
+	data, _ := json.Marshal(job)
+	resp, err := http.Post(selectedNode.Address+"/run", "application/json", bytes.NewBuffer(data))
+
+	if err != nil || resp.StatusCode != http.StatusAccepted {
+		job.Status = proto.JobFailed
+		log.Printf("Dispatch job %s to node %s failed: %v", job.ID, selectedNode.ID, err)
+		http.Error(w, "Failed to dispatch job to agent", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Job %s dispatched to node %s", job.ID, selectedNode.ID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(job)
+}
