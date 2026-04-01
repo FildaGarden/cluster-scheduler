@@ -69,9 +69,12 @@ func (a *Agent) register() {
 		hb = &proto.Heartbeat{}
 	}
 
+	// Automatické zjištění IP adresy pro Mastera
+	ip := metrics.GetLocalIP()
+
 	node := proto.Node{
 		ID:             a.ID,
-		Address:        fmt.Sprintf("http://localhost:%d", a.Port),
+		Address:        fmt.Sprintf("http://%s:%d", ip, a.Port),
 		Status:         proto.NodeIdle,
 		TotalCores:     hb.TotalCores,
 		TotalMemoryMB:  hb.TotalMemoryMB,
@@ -84,7 +87,7 @@ func (a *Agent) register() {
 	if err != nil {
 		log.Fatalf("Registrace selhala: %v", err)
 	}
-	log.Printf("Agent zaregistrovan: %v", a.ID)
+	log.Printf("Agent zaregistrovan na adrese: http://%s:%d", ip, a.Port)
 
 }
 

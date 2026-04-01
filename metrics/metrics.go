@@ -2,11 +2,27 @@ package metrics
 
 import (
 	"cluster-scheduler/proto"
+	"net"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+// GetLocalIP zjistí síťovou adresu uzlu pomocí UDP spojení
+func GetLocalIP() string {
+	// Připoj se na 8.8.8.8 — Google DNS
+	// Neposílá žádná data, jen zjistí jaké rozhraní by použil
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "localhost"
+	}
+	defer conn.Close()
+
+	// Zjisti lokální adresu tohoto spojení
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
 
 func CollectStats(nodeID string) (*proto.Heartbeat, error) {
 	// cpu.Percent gives us the usage percentage

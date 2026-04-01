@@ -1,5 +1,6 @@
 # Binárky
      scheduler
+     cluster-scheduler
      agent/agent
      master/master
      *.exe
