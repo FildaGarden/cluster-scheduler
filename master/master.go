@@ -54,12 +54,13 @@ func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
 	}
 
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if job, ok := m.JobMap[jobUpdate.ID]; ok {
 		job.Status = jobUpdate.Status
 		job.FinishedAt = jobUpdate.FinishedAt
 		log.Printf("Job %s updated to status: %s", job.ID, job.Status)
 	}
-	m.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -73,9 +74,10 @@ func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
 	}
 
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	node.LastSeen = time.Now()
 	m.NodeMap[node.ID] = &node
-	m.mu.Unlock()
 
 	log.Printf("Uzel zaregistrován: %s (%s)", node.ID, node.Address)
 	w.WriteHeader(http.StatusOK)
@@ -90,6 +92,8 @@ func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
 	}
 
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if node, ok := m.NodeMap[hb.NodeID]; ok {
 		node.CPUPercent = hb.CPUPercent
 		node.MemoryPercent = hb.MemoryPercent
@@ -98,11 +102,10 @@ func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
 		node.FreeMemoryMB = hb.FreeMemoryMB
 		node.TotalMemoryMB = hb.TotalMemoryMB
 		node.LastSeen = time.Now()
-		
-		log.Printf("💓 Heartbeat [%s]: CPU %.1f%% | RAM %d/%d MB (%d Cores volno)", 
+
+		log.Printf("💓 Heartbeat [%s]: CPU %.1f%% | RAM %d/%d MB (%d Cores volno)",
 			hb.NodeID, node.CPUPercent, node.FreeMemoryMB, node.TotalMemoryMB, node.AvailableCores)
 	}
-	m.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 }

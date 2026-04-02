@@ -149,8 +149,8 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 		err := cmd.Wait()
 
 		a.mu.Lock()
+		defer a.mu.Unlock()
 		delete(a.jobs, job.ID)
-		a.mu.Unlock()
 
 		job.FinishedAt = time.Now()
 		if err != nil {

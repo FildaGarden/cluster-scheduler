@@ -1,18 +1,28 @@
 # Binárky
-     scheduler
-     cluster-scheduler
-     agent/agent
-     master/master
-     *.exe
-     *.exe~
-     *.dll
-     *.so
-     *.dylib
-   
-# Závislosti (pokud nepoužíváte vendor složku)
-    vendor/
-   
+scheduler
+cluster-scheduler
+agent/agent
+master/master
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Závislosti
+vendor/
+
+# Testy a logy
+*.log
+*.test
+*.prof
+coverage.out
+
 # IDE a OS specifické
-    .idea/
-    .vscode/
-    .DS_Store
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Go specifické
+go.sum

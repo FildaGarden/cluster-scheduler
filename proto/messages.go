@@ -25,41 +25,41 @@ const (
 )
 
 type Job struct {
-	ID         string
-	Command    string
-	CPUCores   int
-	MemoryMB   int
-	Priority   int
-	UserID     string
-	Status     JobStatus
-	NodeID     string
-	CreatedAt  time.Time
-	StartedAt  time.Time
-	FinishedAt time.Time
+	ID         string    `json:"id"`
+	Command    string    `json:"command"`
+	CPUCores   int       `json:"cpu_cores"`
+	MemoryMB   int       `json:"memory_mb"`
+	Priority   int       `json:"priority"`
+	UserID     string    `json:"user_id"`
+	Status     JobStatus `json:"status"`
+	NodeID     string    `json:"node_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
 }
 
 type Node struct {
-	ID             string
-	Address        string
-	CPUPercent     float64
-	MemoryPercent  float64
-	AvailableCores int
-	TotalCores     int
-	FreeMemoryMB   uint64
-	TotalMemoryMB  uint64
-	Status         NodeStatus
-	LastSeen       time.Time
+	ID             string     `json:"id"`
+	Address        string     `json:"address"`
+	CPUPercent     float64    `json:"cpu_percent"`
+	MemoryPercent  float64    `json:"memory_percent"`
+	AvailableCores int        `json:"available_cores"`
+	TotalCores     int        `json:"total_cores"`
+	FreeMemoryMB   uint64     `json:"free_memory_mb"`
+	TotalMemoryMB  uint64     `json:"total_memory_mb"`
+	Status         NodeStatus `json:"status"`
+	LastSeen       time.Time  `json:"last_seen"`
 }
 
 type Heartbeat struct {
-	NodeID         string
-	CPUPercent     float64
-	MemoryPercent  float64
-	AvailableCores int
-	TotalCores     int
-	FreeMemoryMB   uint64
-	TotalMemoryMB  uint64
-	RunningJobs    []string
+	NodeID         string   `json:"node_id"`
+	CPUPercent     float64  `json:"cpu_percent"`
+	MemoryPercent  float64  `json:"memory_percent"`
+	AvailableCores int      `json:"available_cores"`
+	TotalCores     int      `json:"total_cores"`
+	FreeMemoryMB   uint64   `json:"free_memory_mb"`
+	TotalMemoryMB  uint64   `json:"total_memory_mb"`
+	RunningJobs    []string `json:"running_jobs"`
 }
 
 type AlgorithmType string
