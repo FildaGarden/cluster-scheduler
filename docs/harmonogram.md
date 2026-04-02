@@ -4,17 +4,19 @@ Tento dokument slouží jako roadmapa pro praktickou část bakalářské práce
 
 ---
 
-## 🏗️ Fáze 1: Jádro Systému & Reálná Data
+## 🏗️ Fáze 1: Jádro Systému & Reálná Data (HOTOVO ✅)
 **Cíl:** Rozchodit stabilní komunikaci a sběr skutečných dat z hardwaru.
 
-- [ ] **Reálný Monitoring (Agent)**
-  - [ ] Implementace `metrics/metrics.go` pomocí knihovny `gopsutil`.
-  - [ ] Agent posílá v heartbeatu skutečné vytížení CPU a volnou RAM.
-- [ ] **Správa Úloh (Master)**
-  - [ ] Implementace perzistentního úložiště pro úlohy (**SQLite**).
-  - [ ] Master si pamatuje stav úloh i po restartu.
-- [ ] **CLI Klient**
-  - [ ] Rozšíření `scheduler` o příkaz `submit`, který pošle JSON na Mastera.
+- [x] **Reálný Monitoring (Agent)**
+  - [x] Implementace `metrics/metrics.go` pomocí knihovny `gopsutil`.
+  - [x] Agent posílá v heartbeatu skutečné vytížení CPU a volnou RAM.
+- [x] **Automatická Síťová Identifikace**
+  - [x] Implementace IP resolveru (UDP dial trick).
+  - [x] Úspěšné testování na více fyzických zařízeních v LAN.
+- [x] **Správa Úloh (Master)**
+  - [x] Rozšíření logování pro vizuální kontrolu clusteru v reálném čase.
+- [x] **CLI Pomůcky**
+  - [x] Vytvoření `scripts/submit.sh` pro odesílání úloh.
 
 ---
 
