@@ -49,3 +49,38 @@ Tento dokument slouží jako zásobník nápadů pro rozšíření systému. Nej
 ---
 > [!TIP]
 > **Doporučení:** Tyto nápady jsou skvělým materiálem pro kapitolu „Budoucí rozvoj“ v textové části BP, i kdyby nebyly všechny implementovány.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### PROMPT
+
+Pokračujeme v práci na mé bakalářské práci: 'HPC Cluster Scheduler v Go'. Podívej se do složky docs/, konkrétně na harmonogram.md, poznatky.md a ideas.md, abys pochopil aktuální stav
+  projektu. Máme hotovou Fázi 1 (reálný monitoring přes gopsutil, heartbeat, automatickou detekci IP a testování v síti). Dnes se chceme zaměřit na Fázi 2: Implementaci fronty úloh (Queue) v
+  Masterovi a základní Scheduler loop (FIFO).

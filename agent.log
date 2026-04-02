@@ -1,4 +1,0 @@
-2026/04/02 00:04:09 Agent zaregistrovan na adrese: http://192.168.0.111:9002
-2026/04/02 00:04:09 Agent agent01 poslouchá na portu 9002
-2026/04/02 00:04:36 Spouštím úlohu job-23940cdd-5354-4868-844b-dcec176588ec: echo "Hello from Job"; sleep 2; echo "Job Done"
-2026/04/02 00:04:38 Úloha job-23940cdd-5354-4868-844b-dcec176588ec dokončena
