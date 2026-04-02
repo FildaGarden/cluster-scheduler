@@ -13,6 +13,13 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	// MaxControlPayload je limit pro heartbeat a registraci (4KB)
+	MaxControlPayload = 4096
+	// MaxJobPayload je limit pro odeslání jobu, kde může být dlouhý příkaz (16KB)
+	MaxJobPayload = 16384
+)
+
 type Master struct {
 	ListenAddr string
 	NodeMap    map[string]*proto.Node
@@ -47,6 +54,7 @@ func (m *Master) Start() {
 
 // Status update
 func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
+	req.Body = http.MaxBytesReader(w, req.Body, MaxControlPayload)
 	var jobUpdate proto.Job
 	if err := json.NewDecoder(req.Body).Decode(&jobUpdate); err != nil {
 		http.Error(w, "Invalid job update", http.StatusBadRequest)
@@ -67,6 +75,7 @@ func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
 
 //  Registrace noveho Node do Clusteru
 func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
+	req.Body = http.MaxBytesReader(w, req.Body, MaxControlPayload)
 	var node proto.Node
 	if err := json.NewDecoder(req.Body).Decode(&node); err != nil {
 		http.Error(w, "Invalid node registration", http.StatusBadRequest)
@@ -85,6 +94,7 @@ func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
 
 // Node update
 func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
+	req.Body = http.MaxBytesReader(w, req.Body, MaxControlPayload)
 	var hb proto.Heartbeat
 	if err := json.NewDecoder(req.Body).Decode(&hb); err != nil {
 		http.Error(w, "Invalid heartbeat", http.StatusBadRequest)
@@ -94,18 +104,23 @@ func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if node, ok := m.NodeMap[hb.NodeID]; ok {
-		node.CPUPercent = hb.CPUPercent
-		node.MemoryPercent = hb.MemoryPercent
-		node.AvailableCores = hb.AvailableCores
-		node.TotalCores = hb.TotalCores
-		node.FreeMemoryMB = hb.FreeMemoryMB
-		node.TotalMemoryMB = hb.TotalMemoryMB
-		node.LastSeen = time.Now()
-
-		log.Printf("💓 Heartbeat [%s]: CPU %.1f%% | RAM %d/%d MB (%d Cores volno)",
-			hb.NodeID, node.CPUPercent, node.FreeMemoryMB, node.TotalMemoryMB, node.AvailableCores)
+	node, ok := m.NodeMap[hb.NodeID]
+	if !ok {
+		log.Printf("⚠️ Heartbeat od neznámého uzlu: %s", hb.NodeID)
+		http.Error(w, "Node not found", http.StatusNotFound)
+		return
 	}
+
+	node.CPUPercent = hb.CPUPercent
+	node.MemoryPercent = hb.MemoryPercent
+	node.AvailableCores = hb.AvailableCores
+	node.TotalCores = hb.TotalCores
+	node.FreeMemoryMB = hb.FreeMemoryMB
+	node.TotalMemoryMB = hb.TotalMemoryMB
+	node.LastSeen = time.Now()
+
+	log.Printf("💓 Heartbeat [%s]: CPU %.1f%% | RAM %d/%d MB (%d Cores volno)",
+		hb.NodeID, node.CPUPercent, node.FreeMemoryMB, node.TotalMemoryMB, node.AvailableCores)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -113,6 +128,7 @@ func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
 // Provizorni prirazeni Job -> Node (FIFO)
 // TODO: Implementovat vice algoritmu
 func (m *Master) handleSubmit(w http.ResponseWriter, req *http.Request) {
+	req.Body = http.MaxBytesReader(w, req.Body, MaxJobPayload)
 	var job proto.Job
 	if err := json.NewDecoder(req.Body).Decode(&job); err != nil {
 		http.Error(w, "Invalid job submission", http.StatusBadRequest)
