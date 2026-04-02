@@ -130,7 +130,7 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Vytvoreni noveho contextu - predchazi vzniku zombie processes
+	// Vytvoreni noveho contextu - zamezi vzniku zombie processes
 	cmd := exec.CommandContext(a.ctx, "sh", "-c", job.Command)
 
 	if err := cmd.Start(); err != nil {
@@ -144,7 +144,6 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 
 	log.Printf("Spouštím úlohu %s: %s", job.ID, job.Command)
 
-	// Cekani na dokonceni goroutine
 	go func() {
 		err := cmd.Wait()
 
@@ -161,7 +160,6 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 			job.Status = proto.JobDone
 		}
 
-		// Final status update
 		data, _ := json.Marshal(job)
 		_, postErr := http.Post(a.MasterURL+"/update_job", "application/json", bytes.NewBuffer(data))
 		if postErr != nil {

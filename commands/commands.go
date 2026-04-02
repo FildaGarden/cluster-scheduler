@@ -1,4 +1,4 @@
-package main
+package commands
 
 import (
 	"cluster-scheduler/agent"
@@ -8,13 +8,13 @@ import (
 	"fmt"
 )
 
-// runMaster zpracuje parametry pro master uzel
-func runMaster(args []string) {
+// RunMaster zpracuje parametry pro master uzel
+func RunMaster(args []string) {
 	cfg := config.Default()
 	masterCmd := flag.NewFlagSet("master", flag.ExitOnError)
-	
+
 	port := masterCmd.String("p", cfg.ListenAddr, "Port, na kterém master poslouchá (např. :8080)")
-	
+
 	masterCmd.Parse(args)
 
 	fmt.Printf("🚀 Spouštím master na portu %s\n", *port)
@@ -22,10 +22,10 @@ func runMaster(args []string) {
 	m.Start()
 }
 
-// runAgent zpracuje parametry pro agent uzel
-func runAgent(args []string) {
+// RunAgent zpracuje parametry pro agent uzel
+func RunAgent(args []string) {
 	agentCmd := flag.NewFlagSet("agent", flag.ExitOnError)
-	
+
 	id := agentCmd.String("id", "agent01", "Unikátní ID agenta")
 	masterURL := agentCmd.String("master", "http://localhost:8080", "URL adresa mastera")
 	port := agentCmd.Int("p", 9001, "Port, na kterém agent poslouchá")
@@ -37,8 +37,8 @@ func runAgent(args []string) {
 	a.Start()
 }
 
-// printUsage vypíše nápovědu
-func printUsage() {
+// PrintUsage vypíše nápovědu
+func PrintUsage() {
 	fmt.Println("Použití: scheduler <příkaz> [parametry]")
 	fmt.Println("\nPříkazy:")
 	fmt.Println("  master  - Spustí řídicí uzel clusteru")
@@ -50,3 +50,4 @@ func printUsage() {
 	fmt.Println("  -master URL mastera (např. http://192.168.0.2:8080)")
 	fmt.Println("  -p      Lokální port agenta (výchozí 9001)")
 }
+
