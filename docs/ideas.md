@@ -20,6 +20,14 @@ Tento dokument slouží jako zásobník nápadů pro rozšíření systému. Nej
 
 ## 🧠 Plánování (Scheduling)
 
+### 🏎️ Optimistická rezervace zdrojů (Race Condition fix)
+- **Problém:** Pokud dorazí více úloh najednou, Master může vybrat stejný uzel pro všechny, protože uzel ještě nestihl poslat heartbeat s aktualizovaným vytížením.
+- **Idea:** Jakmile Master rozhodne o odeslání úlohy na uzel, okamžitě si u sebe v paměti (v `NodeMap`) "zarezervuje" potřebné zdroje (odečte jádra/RAM), aniž by čekal na potvrzení od Agenta. Heartbeat pak tuto hodnotu jen synchronizuje.
+
+### 🎯 Přesná alokace jader (Allocated vs. Real-time)
+- **Problém:** Aktuálně se volná jádra počítají z reálného vytížení CPU. V HPC je ale standardem, že pokud si úloha řekne o 2 jádra, jsou jí "rezervována" (alokována) bez ohledu na to, zda je v danou sekundu plně vytěžuje.
+- **Idea:** Sledovat `AllocatedCores` na straně Mastera. Kapacita uzlu = `TotalCores - AllocatedCores`. Zabrání to přetížení uzlu, když se úloha po klidném startu náhle "rozjede".
+
 ### ⚖️ Fair-Share Algoritmus
 - **Idea:** Zamezit tomu, aby jeden uživatel zahltil celý cluster. Scheduler bude upřednostňovat ty uživatele, kteří v poslední době spotřebovali nejméně zdrojů.
 
