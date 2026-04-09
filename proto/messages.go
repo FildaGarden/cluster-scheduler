@@ -28,7 +28,7 @@ type Job struct {
 	ID         string    `json:"id"`
 	Command    string    `json:"command"`
 	CPUCores   int       `json:"cpu_cores"`
-	MemoryMB   int       `json:"memory_mb"`
+	MemoryMB   uint64    `json:"memory_mb"`
 	Priority   int       `json:"priority"`
 	UserID     string    `json:"user_id"`
 	Status     JobStatus `json:"status"`

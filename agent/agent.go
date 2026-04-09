@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// Interval v sekundach
+const HeartbeatInterval = 5
+
 type Agent struct {
 	ID        string
 	MasterURL string
@@ -24,11 +27,11 @@ type Agent struct {
 	cancel    context.CancelFunc
 }
 
-func New(id, masterUrl string, port int) *Agent {
+func New(id, masterURL string, port int) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Agent{
 		ID:        id,
-		MasterURL: masterUrl,
+		MasterURL: masterURL,
 		Port:      port,
 		jobs:      make(map[string]*exec.Cmd),
 		ctx:       ctx,
@@ -83,17 +86,18 @@ func (a *Agent) register() {
 	}
 
 	data, _ := json.Marshal(node)
-	_, err = http.Post(a.MasterURL+"/register", "application/json", bytes.NewBuffer(data))
+	res, err := http.Post(a.MasterURL+"/register", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		log.Fatalf("Registrace selhala: %v", err)
 	}
+	defer res.Body.Close()
 	log.Printf("Agent zaregistrovan na adrese: http://%s:%d", ip, a.Port)
 
 }
 
 // Heartbeat -> updatuje status vytizeni Masterovi
 func (a *Agent) heartbeatLoop() {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(HeartbeatInterval * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -116,7 +120,13 @@ func (a *Agent) heartbeatLoop() {
 			hb.RunningJobs = running
 
 			data, _ := json.Marshal(hb)
-			http.Post(a.MasterURL+"/heartbeat", "application/json", bytes.NewBuffer(data))
+			res, err := http.Post(a.MasterURL+"/heartbeat", "application/json", bytes.NewBuffer(data))
+			if err != nil {
+				log.Printf("Heartbeat failed: %v", err)
+				continue
+			}
+			res.Body.Close()
+
 		}
 	}
 
@@ -161,10 +171,12 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 		}
 
 		data, _ := json.Marshal(job)
-		_, postErr := http.Post(a.MasterURL+"/update_job", "application/json", bytes.NewBuffer(data))
-		if postErr != nil {
-			log.Printf("Failed to notify master of job completion: %v", postErr)
+		resp, err := http.Post(a.MasterURL+"/update_job", "application/json", bytes.NewBuffer(data))
+		if err != nil {
+			log.Printf("Failed to notify master of job completion: %v", err)
+			return
 		}
+		resp.Body.Close()
 	}()
 	w.WriteHeader(http.StatusAccepted)
 }

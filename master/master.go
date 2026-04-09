@@ -73,7 +73,7 @@ func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-//  Registrace noveho Node do Clusteru
+// Registrace noveho Node do Clusteru
 func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
 	req.Body = http.MaxBytesReader(w, req.Body, MaxControlPayload)
 	var node proto.Node
@@ -146,29 +146,42 @@ func (m *Master) handleSubmit(w http.ResponseWriter, req *http.Request) {
 
 	var selectedNode *proto.Node
 	for _, node := range m.NodeMap {
-		if node.AvailableCores >= job.CPUCores && node.FreeMemoryMB >= uint64(job.MemoryMB) {
+		if node.AvailableCores >= job.CPUCores && node.FreeMemoryMB >= job.MemoryMB {
 			selectedNode = node
 			break
 		}
 	}
-	m.mu.Unlock()
 
 	if selectedNode == nil {
+		m.mu.Unlock()
 		http.Error(w, "No available nodes for this job", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Priprava na prirazeni
+	// Priprava na prirazeni pod zamkem
 	job.NodeID = selectedNode.ID
 	job.Status = proto.JobRunning
 	job.StartedAt = time.Now()
+	m.mu.Unlock()
 
 	data, _ := json.Marshal(job)
-	resp, err := http.Post(selectedNode.Address+"/run", "application/json", bytes.NewBuffer(data))
+	res, err := http.Post(selectedNode.Address+"/run", "application/json", bytes.NewBuffer(data))
 
-	if err != nil || resp.StatusCode != http.StatusAccepted {
+	if err != nil {
+		m.mu.Lock()
 		job.Status = proto.JobFailed
+		m.mu.Unlock()
 		log.Printf("Dispatch job %s to node %s failed: %v", job.ID, selectedNode.ID, err)
+		http.Error(w, "Failed to dispatch job to agent", http.StatusInternalServerError)
+		return
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusAccepted {
+		m.mu.Lock()
+		job.Status = proto.JobFailed
+		m.mu.Unlock()
+		log.Printf("Dispatch job %s to node %s failed with status: %d", job.ID, selectedNode.ID, res.StatusCode)
 		http.Error(w, "Failed to dispatch job to agent", http.StatusInternalServerError)
 		return
 	}
