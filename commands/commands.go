@@ -6,6 +6,9 @@ import (
 	"cluster-scheduler/master"
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 // RunMaster zpracuje parametry pro master uzel
@@ -18,8 +21,17 @@ func RunMaster(args []string) {
 	masterCmd.Parse(args)
 
 	fmt.Printf("🚀 Spouštím master na portu %s\n", *port)
-	m := master.New(*port)
+	cfg.ListenAddr = *port
+	m := master.New(cfg)
 	m.Start()
+
+	// Graceful shutdown - čekáme na CTRL+C nebo SIGTERM
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+
+	m.Stop()
+	fmt.Println("👋 Master ukončen.")
 }
 
 // RunAgent zpracuje parametry pro agent uzel
@@ -35,6 +47,14 @@ func RunAgent(args []string) {
 	fmt.Printf("📡 Spouštím agenta %s (Master: %s, Port: %d)\n", *id, *masterURL, *port)
 	a := agent.New(*id, *masterURL, *port)
 	a.Start()
+
+	// Graceful shutdown i pro Agenta
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+
+	a.Stop()
+	fmt.Println("👋 Agent ukončen.")
 }
 
 // PrintUsage vypíše nápovědu

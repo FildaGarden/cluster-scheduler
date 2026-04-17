@@ -26,3 +26,5 @@ coverage.out
 
 # Go specifické
 go.sum
+db/scheduler.db*
+db/

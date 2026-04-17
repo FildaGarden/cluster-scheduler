@@ -2,15 +2,21 @@ package master
 
 import (
 	"bytes"
+	"cluster-scheduler/config"
 	"cluster-scheduler/proto"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -20,39 +26,120 @@ const (
 	MaxJobPayload = 16384
 )
 
+type SchedulingStrategy interface {
+	SelectNode(job *proto.Job, nodes map[string]*proto.Node) *proto.Node
+}
+
+type FirstAvailableScheduler struct{}
+
+func (s *FirstAvailableScheduler) SelectNode(job *proto.Job, nodes map[string]*proto.Node) *proto.Node {
+	for _, node := range nodes {
+		if node.AvailableCores >= job.CPUCores && node.FreeMemoryMB >= job.MemoryMB {
+			return node
+		}
+	}
+	return nil
+}
+
+type LeastLoadedScheduler struct{}
+
+func (s *LeastLoadedScheduler) SelectNode(job *proto.Job, nodes map[string]*proto.Node) *proto.Node {
+	var bestNode *proto.Node
+	maxFreeCores := -1
+
+	for _, node := range nodes {
+		if node.AvailableCores >= job.CPUCores && node.FreeMemoryMB >= job.MemoryMB {
+			// Strategie: Vyber uzel s nejvíce volnými jádry
+			if node.AvailableCores > maxFreeCores {
+				maxFreeCores = node.AvailableCores
+				bestNode = node
+			}
+		}
+	}
+	return bestNode
+}
+
 type Master struct {
 	listenAddr string
 	nodes      map[string]*proto.Node
-	jobs       map[string]*proto.Job
 	mu         sync.RWMutex
+	db         *sql.DB
+	scheduler  SchedulingStrategy
 }
 
-func New(listenAddr string) *Master {
-	return &Master{
-		listenAddr: listenAddr,
-		nodes:      make(map[string]*proto.Node),
-		jobs:       make(map[string]*proto.Job),
+func New(cfg *config.Config) *Master {
+	// Zajistit existenci složky pro DB
+	dbPath := "db/scheduler.db"
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		log.Fatalf("Chyba při vytváření složky pro DB: %v", err)
 	}
 
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		log.Fatalf("Chyba pri otvirani databaze %v", err)
+	}
+
+	var strategy SchedulingStrategy
+	switch cfg.Algorithm {
+	case proto.AlgorithmFIFO:
+		strategy = &FirstAvailableScheduler{}
+	case proto.AlgorithmPriority:
+		// Priority je řešena v SQL query (ORDER BY priority), 
+		// pro uzel použijeme Least Loaded jako rozumný default
+		strategy = &LeastLoadedScheduler{}
+	default:
+		strategy = &LeastLoadedScheduler{}
+	}
+
+	m := &Master{
+		listenAddr: cfg.ListenAddr,
+		db:         db,
+		nodes:      make(map[string]*proto.Node),
+		scheduler:  strategy,
+	}
+	m.initDB()
+
+	return m
 }
 
-// Spusteni http serveru a handling routes
+// Start spustí HTTP server a rutiny na pozadí
 func (m *Master) Start() {
+	go m.runSchedulingLoop()
+	go m.runHealthCheck()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", m.handleRegister)
 	mux.HandleFunc("/heartbeat", m.handleHeartbeat)
 	mux.HandleFunc("/submit", m.handleSubmit)
 	mux.HandleFunc("/update_job", m.handleUpdateJob)
 
-	log.Printf("Master poslouchá na %s", m.listenAddr)
+	log.Printf("🚀 Master spuštěn na %s (SQLite & Scheduler aktivní)", m.listenAddr)
 	server := &http.Server{
 		Addr:    m.listenAddr,
 		Handler: mux,
 	}
-	log.Fatal(server.ListenAndServe())
+
+	// Spustíme server v gorutině, aby Start() nebyl blokující
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("❌ Chyba serveru: %v", err)
+		}
+	}()
 }
 
-// Status update
+// Stop bezpečně zastaví Mastera a zavře databázi
+func (m *Master) Stop() {
+	log.Println("🛑 Master se zastavuje a zavírá SQLite...")
+	if m.db != nil {
+		if err := m.db.Close(); err != nil {
+			log.Printf("❌ Chyba při zavírání DB: %v", err)
+		} else {
+			log.Println("✅ Databáze byla v pořádku uzavřena.")
+		}
+	}
+}
+
+// handleUpdateJob zpracuje update statusu od Agenta a uvolní zdroje
 func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
 	req.Body = http.MaxBytesReader(w, req.Body, MaxControlPayload)
 	var jobUpdate proto.Job
@@ -61,19 +148,44 @@ func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// 1. Zjistíme detaily o původní úloze z DB
+	var cpuCores int
+	var memoryMB int
+	var nodeID string
+	var currentStatus string
+	err := m.db.QueryRow("SELECT cpu_cores, memory_mb, node_id, status FROM jobs WHERE id = ?", jobUpdate.ID).
+		Scan(&cpuCores, &memoryMB, &nodeID, &currentStatus)
 
-	if job, ok := m.jobs[jobUpdate.ID]; ok {
-		job.Status = jobUpdate.Status
-		job.FinishedAt = jobUpdate.FinishedAt
-		log.Printf("Job %s updated to status: %s", job.ID, job.Status)
+	if err != nil {
+		log.Printf("⚠️ Update pro neznámou úlohu: %s", jobUpdate.ID)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
 
+	// 2. Pokud úloha končí a dříve běžela, uvolníme zdroje v RAM
+	if (jobUpdate.Status == proto.JobDone || jobUpdate.Status == proto.JobFailed) && currentStatus == string(proto.JobRunning) {
+		m.mu.Lock()
+		if node, ok := m.nodes[strings.ToLower(nodeID)]; ok {
+			node.AvailableCores += cpuCores
+			node.FreeMemoryMB += memoryMB
+			log.Printf("♻️ Uvolněny zdroje na uzlu %s: %d Cores, %d MB RAM (Úloha %s)", nodeID, cpuCores, memoryMB, jobUpdate.ID)
+		}
+		m.mu.Unlock()
+	}
+
+	// 3. Update statusu v DB
+	_, err = m.db.Exec("UPDATE jobs SET status = ?, finished_at = ? WHERE id = ?",
+		jobUpdate.Status, time.Now(), jobUpdate.ID)
+
+	if err != nil {
+		log.Printf("❌ Chyba při updatu DB pro úlohu %s: %v", jobUpdate.ID, err)
+	}
+
+	log.Printf("✅ Úloha %s aktualizována na status: %s", jobUpdate.ID, jobUpdate.Status)
 	w.WriteHeader(http.StatusOK)
 }
 
-// Registrace noveho Node do Clusteru
+// handleRegister zaregistruje nový výpočetní uzel
 func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
 	req.Body = http.MaxBytesReader(w, req.Body, MaxControlPayload)
 	var node proto.Node
@@ -85,14 +197,15 @@ func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	node.ID = strings.ToLower(node.ID)
 	node.LastSeen = time.Now()
 	m.nodes[node.ID] = &node
 
-	log.Printf("Uzel zaregistrován: %s (%s)", node.ID, node.Address)
+	log.Printf("🖥️  Uzel zaregistrován: %s (%s)", node.ID, node.Address)
 	w.WriteHeader(http.StatusOK)
 }
 
-// Node update
+// handleHeartbeat aktualizuje metriky uzlu (bez přepisování rezervací)
 func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
 	req.Body = http.MaxBytesReader(w, req.Body, MaxControlPayload)
 	var hb proto.Heartbeat
@@ -104,29 +217,26 @@ func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	node, ok := m.nodes[hb.NodeID]
+	nodeID := strings.ToLower(hb.NodeID)
+	node, ok := m.nodes[nodeID]
 	if !ok {
-		log.Printf("⚠️ Heartbeat od neznámého uzlu: %s", hb.NodeID)
 		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
 
+	// Aktualizujeme pouze "tvrdá" data z OS
 	node.CPUPercent = hb.CPUPercent
 	node.MemoryPercent = hb.MemoryPercent
-	node.AvailableCores = hb.AvailableCores
 	node.TotalCores = hb.TotalCores
-	node.FreeMemoryMB = hb.FreeMemoryMB
 	node.TotalMemoryMB = hb.TotalMemoryMB
 	node.LastSeen = time.Now()
 
-	log.Printf("💓 Heartbeat [%s]: CPU %.1f%% | RAM %d/%d MB (%d Cores volno)",
-		hb.NodeID, node.CPUPercent, node.FreeMemoryMB, node.TotalMemoryMB, node.AvailableCores)
+	log.Printf("💓 Heartbeat [%s] | CPU: %.1f%% | RAM: %.1f%%", nodeID, node.CPUPercent, node.MemoryPercent)
 
 	w.WriteHeader(http.StatusOK)
 }
 
-// Provizorni prirazeni Job -> Node (FIFO)
-// TODO: Implementovat vice algoritmu
+// handleSubmit přijme novou úlohu a uloží ji do SQLite
 func (m *Master) handleSubmit(w http.ResponseWriter, req *http.Request) {
 	req.Body = http.MaxBytesReader(w, req.Body, MaxJobPayload)
 	var job proto.Job
@@ -138,56 +248,151 @@ func (m *Master) handleSubmit(w http.ResponseWriter, req *http.Request) {
 	if job.ID == "" {
 		job.ID = fmt.Sprintf("job-%s", uuid.New().String())
 	}
-	job.Status = proto.JobPending
-	job.CreatedAt = time.Now()
 
-	m.mu.Lock()
-	m.jobs[job.ID] = &job
-
-	var selectedNode *proto.Node
-	for _, node := range m.nodes {
-		if node.AvailableCores >= job.CPUCores && node.FreeMemoryMB >= job.MemoryMB {
-			selectedNode = node
-			break
-		}
+	// Základní validace a defaulty
+	if job.CPUCores <= 0 {
+		job.CPUCores = 1
+	}
+	if job.MemoryMB <= 0 {
+		job.MemoryMB = 128
 	}
 
-	if selectedNode == nil {
-		m.mu.Unlock()
-		http.Error(w, "No available nodes for this job", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Priprava na prirazeni pod zamkem
-	job.NodeID = selectedNode.ID
-	job.Status = proto.JobRunning
-	job.StartedAt = time.Now()
-	m.mu.Unlock()
-
-	data, _ := json.Marshal(job)
-	res, err := http.Post(selectedNode.Address+"/run", "application/json", bytes.NewBuffer(data))
+	_, err := m.db.Exec(`
+		INSERT INTO jobs(id, command, cpu_cores, memory_mb, priority, status) 
+		VALUES (?, ?, ?, ?, ?, 'pending')`,
+		job.ID, job.Command, job.CPUCores, job.MemoryMB, job.Priority,
+	)
 
 	if err != nil {
-		m.mu.Lock()
-		job.Status = proto.JobFailed
-		m.mu.Unlock()
-		log.Printf("Dispatch job %s to node %s failed: %v", job.ID, selectedNode.ID, err)
-		http.Error(w, "Failed to dispatch job to agent", http.StatusInternalServerError)
-		return
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusAccepted {
-		m.mu.Lock()
-		job.Status = proto.JobFailed
-		m.mu.Unlock()
-		log.Printf("Dispatch job %s to node %s failed with status: %d", job.ID, selectedNode.ID, res.StatusCode)
-		http.Error(w, "Failed to dispatch job to agent", http.StatusInternalServerError)
+		log.Printf("Chyba při ukládání jobu: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Job %s dispatched to node %s", job.ID, selectedNode.ID)
-
+	log.Printf("📥 Úloha přijata a uložena: %s", job.ID)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(job)
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"id": job.ID, "status": "pending"})
+}
+
+func (m *Master) initDB() {
+	query := `CREATE TABLE IF NOT EXISTS jobs (
+    id          TEXT     PRIMARY KEY,
+    command     TEXT     NOT NULL,
+    cpu_cores   INTEGER  NOT NULL DEFAULT 1,
+    memory_mb   INTEGER  NOT NULL DEFAULT 128,
+    priority    INTEGER  NOT NULL DEFAULT 0,
+    status      TEXT     NOT NULL DEFAULT 'pending',
+    node_id     TEXT     DEFAULT '',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at  DATETIME,
+    finished_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_pending ON jobs (status, created_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_jobs_node ON jobs (node_id) WHERE status = 'running';`
+
+	if _, err := m.db.Exec(query); err != nil {
+		log.Fatalf("Chyba vytvareni databaze: %v", err)
+	}
+}
+
+func (m *Master) getNextPendingJob() (*proto.Job, error) {
+	query := `SELECT id, command, COALESCE(cpu_cores, 1), COALESCE(memory_mb, 128), COALESCE(priority, 0) FROM jobs 
+              WHERE status = 'pending' ORDER BY priority DESC, created_at ASC LIMIT 1`
+
+	var job proto.Job
+	err := m.db.QueryRow(query).Scan(&job.ID, &job.Command, &job.CPUCores, &job.MemoryMB, &job.Priority)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &job, err
+}
+
+func (m *Master) runSchedulingLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	for range ticker.C {
+		job, err := m.getNextPendingJob()
+		if err != nil {
+			log.Printf("❌ Chyba při načítání úlohy z DB: %v", err)
+			continue
+		}
+		if job == nil {
+			continue
+		}
+
+		m.mu.Lock()
+		node := m.scheduler.SelectNode(job, m.nodes)
+		if node == nil {
+			log.Printf("⏳ Žádný uzel nemá dostatek zdrojů pro úlohu %s (%d CPU, %d MB RAM)", job.ID, job.CPUCores, job.MemoryMB)
+			m.mu.Unlock()
+			continue
+		}
+
+		// Optimistická rezervace
+		node.AvailableCores -= job.CPUCores
+		node.FreeMemoryMB -= job.MemoryMB
+		m.mu.Unlock()
+
+		_, err = m.db.Exec("UPDATE jobs SET status = 'running', node_id = ?, started_at = ? WHERE id = ?", 
+			node.ID, time.Now(), job.ID)
+		if err != nil {
+			log.Printf("❌ Chyba DB při updatu úlohy %s: %v", job.ID, err)
+			// Vrátit zdroje, pokud update selže
+			m.mu.Lock()
+			if n, ok := m.nodes[strings.ToLower(node.ID)]; ok {
+				n.AvailableCores += job.CPUCores
+				n.FreeMemoryMB += job.MemoryMB
+			}
+			m.mu.Unlock()
+			continue
+		}
+
+		go func(n *proto.Node, j *proto.Job) {
+			data, _ := json.Marshal(j)
+			client := http.Client{Timeout: 5 * time.Second}
+			res, err := client.Post(n.Address+"/run", "application/json", bytes.NewBuffer(data))
+
+			if err != nil {
+				log.Printf("❌ Selhalo odeslání jobu %s na uzel %s: %v", j.ID, n.ID, err)
+				m.requeueJob(n, j)
+				return
+			}
+			defer res.Body.Close()
+
+			if res.StatusCode != http.StatusAccepted {
+				log.Printf("❌ Uzel %s odmítl job %s se statusem %d", n.ID, j.ID, res.StatusCode)
+				m.requeueJob(n, j)
+				return
+			}
+
+			log.Printf("🚀 Úloha %s úspěšně odeslána na uzel %s", j.ID, n.ID)
+		}(node, job)	}
+}
+
+func (m *Master) runHealthCheck() {
+	ticker := time.NewTicker(10 * time.Second)
+	for range ticker.C {
+		m.mu.Lock()
+		now := time.Now()
+		for id, node := range m.nodes {
+			if now.Sub(node.LastSeen) > 30*time.Second {
+				log.Printf("⚠️ Uzel %s offline, odstraňuji ho.", id)
+				delete(m.nodes, id)
+				// Restartování úloh z tohoto uzlu
+				m.db.Exec("UPDATE jobs SET status = 'pending', node_id = '' WHERE node_id = ? AND status = 'running'", id)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+func (m *Master) requeueJob(n *proto.Node, j *proto.Job) {
+	m.mu.Lock()
+	if node, ok := m.nodes[strings.ToLower(n.ID)]; ok {
+		node.AvailableCores += j.CPUCores
+		node.FreeMemoryMB += j.MemoryMB
+	}
+	m.mu.Unlock()
+	m.db.Exec("UPDATE jobs SET status = 'pending', node_id = '' WHERE id = ?", j.ID)
 }

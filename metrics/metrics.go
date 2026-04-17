@@ -52,8 +52,8 @@ func CollectStats(nodeID string) (*proto.Heartbeat, error) {
 		MemoryPercent:  vMem.UsedPercent,
 		TotalCores:     totalCores,
 		AvailableCores: availableCores,
-		FreeMemoryMB:   vMem.Available / mbFactor,
-		TotalMemoryMB:  vMem.Total / mbFactor,
+		FreeMemoryMB:   int(vMem.Available / mbFactor),
+		TotalMemoryMB:  int(vMem.Total / mbFactor),
 		RunningJobs:    []string{}, // Vyplni Agent podle JobsMap
 	}
 
