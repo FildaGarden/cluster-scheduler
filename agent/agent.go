@@ -18,9 +18,9 @@ import (
 const HeartbeatInterval = 5
 
 type Agent struct {
-	ID        string
-	MasterURL string
-	Port      int
+	id        string
+	masterURL string
+	port      int
 	jobs      map[string]*exec.Cmd
 	mu        sync.Mutex
 	ctx       context.Context
@@ -30,9 +30,9 @@ type Agent struct {
 func New(id, masterURL string, port int) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Agent{
-		ID:        id,
-		MasterURL: masterURL,
-		Port:      port,
+		id:        id,
+		masterURL: masterURL,
+		port:      port,
 		jobs:      make(map[string]*exec.Cmd),
 		ctx:       ctx,
 		cancel:    cancel,
@@ -49,9 +49,9 @@ func (a *Agent) Start() {
 	mux.HandleFunc("/run", a.handleRun)
 	mux.HandleFunc("/status", a.handleStatus)
 
-	log.Printf("Agent %s poslouchá na portu %d", a.ID, a.Port)
+	log.Printf("Agent %s poslouchá na portu %d", a.id, a.port)
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", a.Port),
+		Addr:    fmt.Sprintf(":%d", a.port),
 		Handler: mux,
 	}
 	log.Fatal(server.ListenAndServe())
@@ -65,7 +65,7 @@ func (a *Agent) Stop() {
 // Registrace agenta
 func (a *Agent) register() {
 	// Pocatecni metriky pro registraci
-	hb, err := metrics.CollectStats(a.ID)
+	hb, err := metrics.CollectStats(a.id)
 	if err != nil {
 		log.Printf("Chyba při sběru metrik: %v", err)
 		// Pokračujeme s nulovými metrikami, pokud sběr selže
@@ -76,8 +76,8 @@ func (a *Agent) register() {
 	ip := metrics.GetLocalIP()
 
 	node := proto.Node{
-		ID:             a.ID,
-		Address:        fmt.Sprintf("http://%s:%d", ip, a.Port),
+		ID:             a.id,
+		Address:        fmt.Sprintf("http://%s:%d", ip, a.port),
 		Status:         proto.NodeIdle,
 		TotalCores:     hb.TotalCores,
 		TotalMemoryMB:  hb.TotalMemoryMB,
@@ -86,12 +86,12 @@ func (a *Agent) register() {
 	}
 
 	data, _ := json.Marshal(node)
-	res, err := http.Post(a.MasterURL+"/register", "application/json", bytes.NewBuffer(data))
+	res, err := http.Post(a.masterURL+"/register", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		log.Fatalf("Registrace selhala: %v", err)
 	}
 	defer res.Body.Close()
-	log.Printf("Agent zaregistrovan na adrese: http://%s:%d", ip, a.Port)
+	log.Printf("Agent zaregistrovan na adrese: http://%s:%d", ip, a.port)
 
 }
 
@@ -104,7 +104,7 @@ func (a *Agent) heartbeatLoop() {
 		case <-a.ctx.Done():
 			return
 		case <-ticker.C:
-			hb, err := metrics.CollectStats(a.ID)
+			hb, err := metrics.CollectStats(a.id)
 			if err != nil {
 				log.Printf("Chyba při sběru metrik: %v", err)
 				continue
@@ -120,7 +120,7 @@ func (a *Agent) heartbeatLoop() {
 			hb.RunningJobs = running
 
 			data, _ := json.Marshal(hb)
-			res, err := http.Post(a.MasterURL+"/heartbeat", "application/json", bytes.NewBuffer(data))
+			res, err := http.Post(a.masterURL+"/heartbeat", "application/json", bytes.NewBuffer(data))
 			if err != nil {
 				log.Printf("Heartbeat failed: %v", err)
 				continue
@@ -171,7 +171,7 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 		}
 
 		data, _ := json.Marshal(job)
-		resp, err := http.Post(a.MasterURL+"/update_job", "application/json", bytes.NewBuffer(data))
+		resp, err := http.Post(a.masterURL+"/update_job", "application/json", bytes.NewBuffer(data))
 		if err != nil {
 			log.Printf("Failed to notify master of job completion: %v", err)
 			return
@@ -192,7 +192,7 @@ func (a *Agent) handleStatus(w http.ResponseWriter, req *http.Request) {
 	}
 
 	status := map[string]any{
-		"node_id":      a.ID,
+		"node_id":      a.id,
 		"running_jobs": running,
 		"job_count":    len(a.jobs),
 	}

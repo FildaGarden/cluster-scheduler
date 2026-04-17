@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Adresa tvého Mastera (změň, pokud se změní IP)
-MASTER="http://192.168.0.111:8080"
+MASTER="http://localhost:8080"
 
 # Statické parametry pro rychlé testování
 COMMAND="echo 'Testovaci uloha spoustena pres script'; sleep 5; echo 'Uloha hotova'"

@@ -21,17 +21,17 @@ const (
 )
 
 type Master struct {
-	ListenAddr string
-	NodeMap    map[string]*proto.Node
-	JobMap     map[string]*proto.Job
-	mu         sync.Mutex
+	listenAddr string
+	nodes      map[string]*proto.Node
+	jobs       map[string]*proto.Job
+	mu         sync.RWMutex
 }
 
 func New(listenAddr string) *Master {
 	return &Master{
-		ListenAddr: listenAddr,
-		NodeMap:    make(map[string]*proto.Node),
-		JobMap:     make(map[string]*proto.Job),
+		listenAddr: listenAddr,
+		nodes:      make(map[string]*proto.Node),
+		jobs:       make(map[string]*proto.Job),
 	}
 
 }
@@ -44,9 +44,9 @@ func (m *Master) Start() {
 	mux.HandleFunc("/submit", m.handleSubmit)
 	mux.HandleFunc("/update_job", m.handleUpdateJob)
 
-	log.Printf("Master poslouchá na %s", m.ListenAddr)
+	log.Printf("Master poslouchá na %s", m.listenAddr)
 	server := &http.Server{
-		Addr:    m.ListenAddr,
+		Addr:    m.listenAddr,
 		Handler: mux,
 	}
 	log.Fatal(server.ListenAndServe())
@@ -64,7 +64,7 @@ func (m *Master) handleUpdateJob(w http.ResponseWriter, req *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if job, ok := m.JobMap[jobUpdate.ID]; ok {
+	if job, ok := m.jobs[jobUpdate.ID]; ok {
 		job.Status = jobUpdate.Status
 		job.FinishedAt = jobUpdate.FinishedAt
 		log.Printf("Job %s updated to status: %s", job.ID, job.Status)
@@ -86,7 +86,7 @@ func (m *Master) handleRegister(w http.ResponseWriter, req *http.Request) {
 	defer m.mu.Unlock()
 
 	node.LastSeen = time.Now()
-	m.NodeMap[node.ID] = &node
+	m.nodes[node.ID] = &node
 
 	log.Printf("Uzel zaregistrován: %s (%s)", node.ID, node.Address)
 	w.WriteHeader(http.StatusOK)
@@ -104,7 +104,7 @@ func (m *Master) handleHeartbeat(w http.ResponseWriter, req *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	node, ok := m.NodeMap[hb.NodeID]
+	node, ok := m.nodes[hb.NodeID]
 	if !ok {
 		log.Printf("⚠️ Heartbeat od neznámého uzlu: %s", hb.NodeID)
 		http.Error(w, "Node not found", http.StatusNotFound)
@@ -142,10 +142,10 @@ func (m *Master) handleSubmit(w http.ResponseWriter, req *http.Request) {
 	job.CreatedAt = time.Now()
 
 	m.mu.Lock()
-	m.JobMap[job.ID] = &job
+	m.jobs[job.ID] = &job
 
 	var selectedNode *proto.Node
-	for _, node := range m.NodeMap {
+	for _, node := range m.nodes {
 		if node.AvailableCores >= job.CPUCores && node.FreeMemoryMB >= job.MemoryMB {
 			selectedNode = node
 			break
