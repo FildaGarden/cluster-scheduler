@@ -22,8 +22,8 @@ import (
 const (
 	// MaxControlPayload je limit pro heartbeat a registraci (4KB)
 	MaxControlPayload = 4096
-	// MaxJobPayload je limit pro odeslání jobu (1MB)
-	MaxJobPayload = 1024 * 1024
+	// MaxJobPayload je limit pro odeslání jobu, kde může být dlouhý příkaz (16KB)
+	MaxJobPayload = 16384
 )
 
 type SchedulingStrategy interface {
@@ -81,9 +81,11 @@ func New(cfg *config.Config) *Master {
 
 	var strategy SchedulingStrategy
 	switch cfg.Algorithm {
-	case proto.AlgorithmFirstAvailable:
+	case proto.AlgorithmFIFO:
 		strategy = &FirstAvailableScheduler{}
-	case proto.AlgorithmLeastLoaded:
+	case proto.AlgorithmPriority:
+		// Priority je řešena v SQL query (ORDER BY priority), 
+		// pro uzel použijeme Least Loaded jako rozumný default
 		strategy = &LeastLoadedScheduler{}
 	default:
 		strategy = &LeastLoadedScheduler{}
@@ -109,8 +111,6 @@ func (m *Master) Start() {
 	mux.HandleFunc("/heartbeat", m.handleHeartbeat)
 	mux.HandleFunc("/submit", m.handleSubmit)
 	mux.HandleFunc("/update_job", m.handleUpdateJob)
-	mux.HandleFunc("/nodes", m.handleListNodes)
-	mux.HandleFunc("/jobs", m.handleListJobs)
 
 	log.Printf("[INFO] [MASTER] Master uzel spuštěn na %s", m.listenAddr)
 	server := &http.Server{
