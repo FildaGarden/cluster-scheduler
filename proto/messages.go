@@ -22,9 +22,8 @@ const (
 type AlgorithmType string
 
 const (
-	AlgorithmFIFO      AlgorithmType = "fifo"
-	AlgorithmPriority  AlgorithmType = "priority"
-	AlgorithmFairShare AlgorithmType = "fair-share"
+	AlgorithmFirstAvailable AlgorithmType = "first-available"
+	AlgorithmLeastLoaded    AlgorithmType = "least-loaded"
 )
 
 type Job struct {

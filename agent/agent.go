@@ -49,7 +49,7 @@ func (a *Agent) Start() {
 	mux.HandleFunc("/run", a.handleRun)
 	mux.HandleFunc("/status", a.handleStatus)
 
-	log.Printf("Agent %s poslouchá na portu %d", a.id, a.port)
+	log.Printf("[INFO] [AGENT] Agent %s naslouchá na portu %d", a.id, a.port)
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", a.port),
 		Handler: mux,
@@ -67,7 +67,7 @@ func (a *Agent) register() {
 	// Pocatecni metriky pro registraci
 	hb, err := metrics.CollectStats(a.id)
 	if err != nil {
-		log.Printf("Chyba při sběru metrik: %v", err)
+		log.Printf("[ERR] [AGENT] Chyba při sběru systémových metrik: %v", err)
 		// Pokračujeme s nulovými metrikami, pokud sběr selže
 		hb = &proto.Heartbeat{}
 	}
@@ -88,10 +88,10 @@ func (a *Agent) register() {
 	data, _ := json.Marshal(node)
 	res, err := http.Post(a.masterURL+"/register", "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		log.Fatalf("Registrace selhala: %v", err)
+		log.Fatalf("[ERR] [AGENT] Registrace u master uzlu selhala: %v", err)
 	}
 	defer res.Body.Close()
-	log.Printf("Agent zaregistrovan na adrese: http://%s:%d", ip, a.port)
+	log.Printf("[INFO] [AGENT] Agent úspěšně zaregistrován na adrese: http://%s:%d", ip, a.port)
 
 }
 
@@ -106,7 +106,7 @@ func (a *Agent) heartbeatLoop() {
 		case <-ticker.C:
 			hb, err := metrics.CollectStats(a.id)
 			if err != nil {
-				log.Printf("Chyba při sběru metrik: %v", err)
+				log.Printf("[ERR] [AGENT] Chyba při sběru systémových metrik: %v", err)
 				continue
 			}
 
@@ -122,7 +122,7 @@ func (a *Agent) heartbeatLoop() {
 			data, _ := json.Marshal(hb)
 			res, err := http.Post(a.masterURL+"/heartbeat", "application/json", bytes.NewBuffer(data))
 			if err != nil {
-				log.Printf("Heartbeat failed: %v", err)
+				log.Printf("[ERR] [AGENT] Heartbeat selhal: %v", err)
 				continue
 			}
 			res.Body.Close()
@@ -136,7 +136,7 @@ func (a *Agent) heartbeatLoop() {
 func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 	var job proto.Job
 	if err := json.NewDecoder(req.Body).Decode(&job); err != nil {
-		http.Error(w, "Invalid job", http.StatusBadRequest)
+		http.Error(w, "Neplatné zadání úlohy", http.StatusBadRequest)
 		return
 	}
 
@@ -144,7 +144,7 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 	cmd := exec.CommandContext(a.ctx, "sh", "-c", job.Command)
 
 	if err := cmd.Start(); err != nil {
-		http.Error(w, "Failed to start the job", http.StatusInternalServerError)
+		http.Error(w, "Chyba: Nepodařilo se spustit úlohu", http.StatusInternalServerError)
 		return
 	}
 
@@ -152,7 +152,7 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 	a.jobs[job.ID] = cmd
 	a.mu.Unlock()
 
-	log.Printf("Spouštím úlohu %s: %s", job.ID, job.Command)
+	log.Printf("[INFO] [AGENT] Spouštění úlohy %s: %s", job.ID, job.Command)
 
 	go func() {
 		err := cmd.Wait()
@@ -163,17 +163,17 @@ func (a *Agent) handleRun(w http.ResponseWriter, req *http.Request) {
 
 		job.FinishedAt = time.Now()
 		if err != nil {
-			log.Printf("Úloha %s selhala: %v", job.ID, err)
+			log.Printf("[ERR] [AGENT] Úloha %s selhala: %v", job.ID, err)
 			job.Status = proto.JobFailed
 		} else {
-			log.Printf("Úloha %s dokončena", job.ID)
+			log.Printf("[INFO] [AGENT] Úloha %s byla úspěšně dokončena", job.ID)
 			job.Status = proto.JobDone
 		}
 
 		data, _ := json.Marshal(job)
 		resp, err := http.Post(a.masterURL+"/update_job", "application/json", bytes.NewBuffer(data))
 		if err != nil {
-			log.Printf("Failed to notify master of job completion: %v", err)
+			log.Printf("[ERR] [AGENT] Nepodařilo se odeslat stav úlohy master uzlu: %v", err)
 			return
 		}
 		resp.Body.Close()
