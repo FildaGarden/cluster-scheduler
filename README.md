@@ -1,4 +1,4 @@
-# HPC Cluster Scheduler
+# HPC Cluster Scheduler *WIP*
 
 Jednoduchý distribuovaný plánovač úloh pro HPC (High Performance Computing) clustery napsaný v Go. Systém umožňuje správu výpočetních uzlů, řazení úloh do fronty s prioritami a jejich následnou distribuci na dostupné agenty.
 
