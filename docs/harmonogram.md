@@ -27,7 +27,9 @@ Tento dokument slouží jako roadmapa pro praktickou část bakalářské práce
   - [ ] Úlohy se po přijetí ukládají do DB se stavem `Pending`.
 - [ ] **Scheduler Loop**
   - [ ] Background gorutina v Masterovi, která cyklicky prochází frontu.
-  - [ ] Implementace algoritmů: **FIFO** a **Priority**.
+  - [ ] Implementace algoritmů:
+    - [ ] Výběr úloh (**FIFO**, **Priority**).
+    - [ ] Výběr uzlů (**FirstAvailable**, **LeastLoaded**).
   - [ ] **Optimistická rezervace:** Zamezení race condition při plánování více úloh najednou.
   - [ ] **Alokace jader:** Přechod z "Real-time CPU" na "Allocated Cores" model.
 - [ ] **Multi-node Test**

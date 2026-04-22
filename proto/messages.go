@@ -19,12 +19,19 @@ const (
 	NodeOffline NodeStatus = "offline"
 )
 
-type AlgorithmType string
+type JobAlgorithm string
 
 const (
-	AlgorithmFIFO      AlgorithmType = "fifo"
-	AlgorithmPriority  AlgorithmType = "priority"
-	AlgorithmFairShare AlgorithmType = "fair-share"
+	JobAlgoFIFO      JobAlgorithm = "fifo"
+	JobAlgoPriority  JobAlgorithm = "priority"
+	JobAlgoFairShare JobAlgorithm = "fair-share"
+)
+
+type NodeAlgorithm string
+
+const (
+	NodeAlgoFirstAvailable NodeAlgorithm = "first-available"
+	NodeAlgoLeastLoaded    NodeAlgorithm = "least-loaded"
 )
 
 type Job struct {

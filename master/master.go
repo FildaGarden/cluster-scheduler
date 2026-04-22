@@ -60,11 +60,12 @@ func (s *LeastLoadedScheduler) SelectNode(job *proto.Job, nodes map[string]*prot
 }
 
 type Master struct {
-	listenAddr string
-	nodes      map[string]*proto.Node
-	mu         sync.RWMutex
-	db         *sql.DB
-	scheduler  SchedulingStrategy
+	listenAddr   string
+	nodes        map[string]*proto.Node
+	mu           sync.RWMutex
+	db           *sql.DB
+	scheduler    SchedulingStrategy
+	jobAlgorithm proto.JobAlgorithm
 }
 
 func New(cfg *config.Config) *Master {
@@ -80,21 +81,20 @@ func New(cfg *config.Config) *Master {
 	}
 
 	var strategy SchedulingStrategy
-	switch cfg.Algorithm {
-	case proto.AlgorithmFIFO:
+	switch cfg.NodeAlgorithm {
+	case proto.NodeAlgoFirstAvailable:
 		strategy = &FirstAvailableScheduler{}
-	case proto.AlgorithmPriority:
-		// Priority je řešena v SQL query (ORDER BY priority), 
-		// pro uzel použijeme Least Loaded jako rozumný default
+	case proto.NodeAlgoLeastLoaded:
 		strategy = &LeastLoadedScheduler{}
 	default:
 		strategy = &LeastLoadedScheduler{}
 	}
 	m := &Master{
-		listenAddr: cfg.ListenAddr,
-		db:         db,
-		nodes:      make(map[string]*proto.Node),
-		scheduler:  strategy,
+		listenAddr:   cfg.ListenAddr,
+		db:           db,
+		nodes:        make(map[string]*proto.Node),
+		scheduler:    strategy,
+		jobAlgorithm: cfg.JobAlgorithm,
 	}
 	m.initDB()
 
@@ -295,8 +295,19 @@ CREATE INDEX IF NOT EXISTS idx_jobs_node ON jobs (node_id) WHERE status = 'runni
 }
 
 func (m *Master) getNextPendingJob() (*proto.Job, error) {
-	query := `SELECT id, command, COALESCE(cpu_cores, 1), COALESCE(memory_mb, 128), COALESCE(priority, 0) FROM jobs 
-              WHERE status = 'pending' ORDER BY priority DESC, created_at ASC LIMIT 1`
+	var orderBy string
+
+	switch m.jobAlgorithm {
+	case proto.JobAlgoPriority:
+		orderBy = "priority DESC, created_at ASC"
+	case proto.JobAlgoFIFO:
+		orderBy = "created_at ASC"
+	default:
+		orderBy = "created_at ASC"
+	}
+
+	query := fmt.Sprintf(`SELECT id, command, COALESCE(cpu_cores, 1), COALESCE(memory_mb, 128), COALESCE(priority, 0) FROM jobs 
+              WHERE status = 'pending' ORDER BY %s LIMIT 1`, orderBy)
 
 	var job proto.Job
 	err := m.db.QueryRow(query).Scan(&job.ID, &job.Command, &job.CPUCores, &job.MemoryMB, &job.Priority)
