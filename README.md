@@ -18,7 +18,7 @@ Systém se skládá ze dvou hlavních komponent:
 
 Klonování repozitáře:
 ```bash
-git clone https://github.com/vasi-jmeno/cluster-scheduler
+git clone https://github.com/FildaGarden/cluster-scheduler
 cd cluster-scheduler
 ```
 
@@ -66,9 +66,3 @@ curl -X POST http://localhost:8080/submit \
 *   `POST /heartbeat` - Aktualizace stavu agenta.
 *   `POST /update_job` - Hlášení o dokončení úlohy.
 
-## Funkce a vlastnosti
-
-*   **Persistence**: Úlohy jsou trvale uloženy v SQLite, což umožňuje obnovu fronty po restartu mastera.
-*   **Plánování**: Podpora strategií FIFO a Least Loaded (rozprostření zátěže).
-*   **Monitorování**: Sběr reálných systémových metrik pomocí gopsutil.
-*   **Health Check**: Automatické odpojování nedostupných uzlů a opětovné zařazení přerušených úloh do fronty.
