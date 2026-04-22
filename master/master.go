@@ -306,7 +306,7 @@ func (m *Master) getNextPendingJob() (*proto.Job, error) {
 		orderBy = "created_at ASC"
 	}
 
-	query := fmt.Sprintf(`SELECT id, command, COALESCE(cpu_cores, 1), COALESCE(memory_mb, 128), COALESCE(priority, 0) FROM jobs 
+	query := fmt.Sprintf(`SELECT id, command, cpu_cores, memory_mb, priority FROM jobs 
               WHERE status = 'pending' ORDER BY %s LIMIT 1`, orderBy)
 
 	var job proto.Job
