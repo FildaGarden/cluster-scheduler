@@ -28,3 +28,4 @@ coverage.out
 go.sum
 db/scheduler.db*
 db/
+docs/
